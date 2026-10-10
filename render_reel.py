@@ -33,7 +33,7 @@ def run(args):
 LIMITS = {
     "title": 100, "phrase": 180, "phrase_hi": 180, "meaning_hi": 300,
     "example": 180, "example_hi": 180,
-    "say_it": 120, "get_it": 120, "use_it": 120,
+    "say_it": 200, "get_it": 120, "use_it": 260,
 }
 
 
