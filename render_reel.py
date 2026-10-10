@@ -177,9 +177,10 @@ def card(label, primary, secondary, title, index, dest):
     # Small editorial masthead and lesson number.
     d.rounded_rectangle((88, 170, 408, 226), radius=28, fill=ink)
     dtext(d, (111, 182), "DAILY / ENGLISH", 27, True, cream)
+    dtext(d, (88, 244), "@englishwithhindi.learn", 24, True, "#5d706a")
     dtext(d, (815, 180), f"0{index} / 03", 28, True, ink)
-    headlines = ["ऐसे बोलो", "इसका मतलब", "एक उदाहरण"]
-    endings = ["और स्वाभाविक।", "अच्छी तरह समझो।", "अभ्यास करो।"]
+    headlines = ["आज का वाक्य", "इसका मतलब", "एक उदाहरण"]
+    endings = ["ऐसे बोलो।", "अच्छी तरह समझो।", "अभ्यास करो।"]
     dtext(d, (88, 290), headlines[index-1], 92, True, ink)
     dtext(d, (88, 395), endings[index-1], 92, True, coral)
     panel = (88, 570, 944, 1180)
@@ -203,30 +204,31 @@ def card(label, primary, secondary, title, index, dest):
         dtext(d, (132, y), line, size_s, False, fg)
         y += size_s + 14
     # Deliberate supporting visual, with a different learning cue per scene.
-    d.rounded_rectangle((88, 1250, 944, 1428), radius=32, fill="#ffffff")
-    d.ellipse((116, 1288, 222, 1394), fill=mint if index != 2 else coral)
+    # Bottom block sits above y=1600 to stay clear of IG's caption/action overlay.
+    d.rounded_rectangle((88, 1230, 944, 1408), radius=32, fill="#ffffff")
+    d.ellipse((116, 1268, 222, 1374), fill=mint if index != 2 else coral)
     if index == 1:
         # Speech waveform.
         for n, h in enumerate([16, 35, 58, 78, 44, 26]):
             x = 137 + n*12
-            d.rounded_rectangle((x, 1341-h/2, x+6, 1341+h/2), radius=3, fill=ink)
+            d.rounded_rectangle((x, 1321-h/2, x+6, 1321+h/2), radius=3, fill=ink)
         heading, detail = "ज़ोर से बोलो", "सुनो, फिर मेरे साथ दोहराओ।"
     elif index == 2:
-        d.line((144, 1340, 163, 1360, 197, 1320), fill=ink, width=8)
-        heading, detail = "एक बार में एक ही वाक्य", "सरल ही याद रहता है।"
+        d.line((144, 1320, 163, 1340, 197, 1300), fill=ink, width=8)
+        heading, detail = "एक बार में एक ही वाक्य", "सरल बातें ही याद रहती हैं।"
     else:
-        d.rounded_rectangle((141, 1315, 197, 1358), radius=10, outline=ink, width=4)
-        d.polygon([(151, 1356), (151, 1371), (171, 1356)], fill=ink)
-        heading, detail = "अब आपकी बारी", "खुद एक वाक्य बनाकर देखो।"
-    dtext(d, (252, 1292), heading, 34, True, ink)
-    dtext(d, (252, 1350), detail, 27, False, "#5d706a")
+        d.rounded_rectangle((141, 1295, 197, 1338), radius=10, outline=ink, width=4)
+        d.polygon([(151, 1336), (151, 1351), (171, 1336)], fill=ink)
+        heading, detail = "अब तुम्हारी बारी", "खुद एक वाक्य बनाकर देखो।"
+    dtext(d, (252, 1272), heading, 34, True, ink)
+    dtext(d, (252, 1330), detail, 27, False, "#5d706a")
     for j, line in enumerate(wrap(d, title, 28, False, 800)[:2]):
-        dtext(d, (88, 1490+j*36), line, 28, False, "#5d706a")
+        dtext(d, (88, 1445+j*36), line, 28, False, "#5d706a")
     # Three-part navigation gives the lesson a clear visual rhythm.
     for j, stage in enumerate(["बोलो", "समझो", "अभ्यास करो"]):
         x = 88+j*290
-        d.rounded_rectangle((x, 1608, x+270, 1616), radius=4, fill=coral if j+1 == index else "#ddd6cb")
-        dtext(d, (x, 1636), stage, 24, True, ink if j+1 == index else "#86928b")
+        d.rounded_rectangle((x, 1545, x+270, 1553), radius=4, fill=coral if j+1 == index else "#ddd6cb")
+        dtext(d, (x, 1573), stage, 24, True, ink if j+1 == index else "#86928b")
     im.save(dest)
 
 
