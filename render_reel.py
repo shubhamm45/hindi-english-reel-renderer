@@ -7,12 +7,17 @@ Lesson JSON schema:
 
 Cards are bilingual: English phrase big + Hindi below; the voice
 narrates in Hindi (hi-IN-SwaraNeural by default).
-Requires a Devanagari font (fonts-noto-core) - DejaVu cannot render Hindi.
+
+Fonts: Noto Sans Devanagari covers Devanagari but NOT Latin, and Noto Sans
+covers Latin but NOT Devanagari - lesson text mixes both (e.g. "यह I am
+coming से ..."), so text is drawn in per-script runs with the matching font.
+Requires fonts-noto-core - DejaVu cannot render Hindi.
 """
 import argparse
 import asyncio
 import json
 import os
+from functools import lru_cache
 from pathlib import Path
 import re
 import subprocess
@@ -48,7 +53,7 @@ def validate(lesson, request_id):
 _RAQM = getattr(ImageFont.Layout, "RAQM", None)
 
 
-def _open_font(path, size):
+def _load(path, size):
     # RAQM shapes Devanagari conjuncts and matras correctly; fall back to
     # the basic layout engine if libraqm is unavailable.
     if _RAQM is not None:
@@ -59,39 +64,88 @@ def _open_font(path, size):
     return ImageFont.truetype(path, size)
 
 
-def font(size, bold=False):
+def _first_existing(candidates):
+    for path in candidates:
+        if path and Path(path).exists():
+            return path
+    return None
+
+
+@lru_cache(maxsize=256)
+def font_dev(size, bold=False):
+    """Devanagari-capable font. NOTE: covers no Latin letters."""
     dev = ("/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf" if bold
            else "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf")
     dev_alt = ("/usr/share/fonts/opentype/noto/NotoSansDevanagari-Bold.otf" if bold
                else "/usr/share/fonts/opentype/noto/NotoSansDevanagari-Regular.otf")
-    cjk = ("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc" if bold
-           else "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")
-    candidates = [os.environ.get("REEL_FONT", ""), dev, dev_alt, cjk,
+    path = _first_existing([os.environ.get("REEL_FONT", ""), dev, dev_alt])
+    if not path:
+        raise RuntimeError("Install fonts-noto-core or set REEL_FONT to a Devanagari .ttf/.otf font")
+    return _load(path, size)
+
+
+@lru_cache(maxsize=256)
+def font_lat(size, bold=False):
+    """Latin font for English text (Noto Sans has no Devanagari)."""
+    lat = ("/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf" if bold
+           else "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf")
+    path = _first_existing([lat,
         f"/usr/share/fonts/truetype/dejavu/DejaVuSans{'-Bold' if bold else ''}.ttf",
-        f"/System/Library/Fonts/Supplemental/Arial{' Bold' if bold else ''}.ttf"]
-    for path in candidates:
-        if path and Path(path).exists():
-            try:
-                return _open_font(path, size)
-            except Exception:
-                continue
-    raise RuntimeError("Install fonts-noto-core (or DejaVu) or set REEL_FONT to a .ttf/.ttc font")
+        f"/System/Library/Fonts/Supplemental/Arial{' Bold' if bold else ''}.ttf"])
+    if not path:
+        raise RuntimeError("Install fonts-noto-core (or DejaVu)")
+    return _load(path, size)
 
 
-def wrap(draw, text, face, width):
+def runs(text):
+    """Split text into (is_devanagari, segment) runs for per-script fonts."""
+    out, buf, cur = [], [], None
+    for ch in text:
+        is_dev = "\u0900" <= ch <= "\u097f"
+        if cur is None or is_dev == cur:
+            buf.append(ch)
+            cur = is_dev
+        else:
+            out.append((cur, "".join(buf)))
+            buf, cur = [ch], is_dev
+    if buf:
+        out.append((cur, "".join(buf)))
+    return out
+
+
+def measure(draw, text, size, bold=False):
+    """Total width of mixed-script text at the given size."""
+    total = 0
+    for is_dev, seg in runs(text):
+        face = font_dev(size, bold) if is_dev else font_lat(size, bold)
+        total += draw.textlength(seg, font=face)
+    return total
+
+
+def dtext(d, xy, text, size, bold=False, fill=None):
+    """Draw text, switching fonts per script run so mixed Hindi/English
+    never renders as tofu boxes."""
+    x, y = xy
+    for is_dev, seg in runs(text):
+        face = font_dev(size, bold) if is_dev else font_lat(size, bold)
+        d.text((x, y), seg, font=face, fill=fill)
+        x += d.textlength(seg, font=face)
+
+
+def wrap(draw, text, size, bold, width):
     lines = []
     for paragraph in text.splitlines() or [text]:
         line = ""
         for word in paragraph.split():
             proposed = f"{line} {word}".strip()
-            if draw.textlength(proposed, font=face) <= width:
+            if measure(draw, proposed, size, bold) <= width:
                 line = proposed
             else:
                 if line:
                     lines.append(line)
                 line = ""
                 for char in word:
-                    if draw.textlength(line + char, font=face) > width:
+                    if measure(draw, line + char, size, bold) > width:
                         lines.append(line)
                         line = char
                     else:
@@ -102,13 +156,12 @@ def wrap(draw, text, face, width):
 
 
 def fit_block(draw, text, width, max_height, start_size, min_size, bold=True):
-    """Shrink font until the wrapped text fits max_height. Returns (face, lines)."""
+    """Shrink font until the wrapped text fits max_height. Returns (size, lines)."""
     size = start_size
     while True:
-        face = font(size, bold)
-        lines = wrap(draw, text, face, width)
+        lines = wrap(draw, text, size, bold, width)
         if len(lines) * (size + 18) <= max_height:
-            return face, lines
+            return size, lines
         size -= 2
         if size < min_size:
             raise ValueError("Text cannot fit on a card")
@@ -123,12 +176,12 @@ def card(label, primary, secondary, title, index, dest):
     d.ellipse((-180, 1480, 300, 1960), fill="#eadfcf")
     # Small editorial masthead and lesson number.
     d.rounded_rectangle((88, 170, 408, 226), radius=28, fill=ink)
-    d.text((111, 182), "DAILY / ENGLISH", font=font(27, True), fill=cream)
-    d.text((815, 180), f"0{index} / 03", font=font(28, True), fill=ink)
+    dtext(d, (111, 182), "DAILY / ENGLISH", 27, True, cream)
+    dtext(d, (815, 180), f"0{index} / 03", 28, True, ink)
     headlines = ["ऐसे बोलो", "इसका मतलब", "एक उदाहरण"]
     endings = ["और स्वाभाविक।", "अच्छी तरह समझो।", "अभ्यास करो।"]
-    d.text((88, 290), headlines[index-1], font=font(92, True), fill=ink)
-    d.text((88, 395), endings[index-1], font=font(92, True), fill=coral)
+    dtext(d, (88, 290), headlines[index-1], 92, True, ink)
+    dtext(d, (88, 395), endings[index-1], 92, True, coral)
     panel = (88, 570, 944, 1180)
     fill = [ink, mint, coral][index-1]
     fg = cream if index == 1 else ink
@@ -136,19 +189,19 @@ def card(label, primary, secondary, title, index, dest):
     d.rounded_rectangle((100, 584, 956, 1194), radius=38, fill="#ddd4c5")
     d.rounded_rectangle(panel, radius=38, fill=fill)
     small_label = ["अंग्रेज़ी वाक्य", "हिंदी में समझो", "व्यावहारिक उदाहरण"][index-1]
-    d.text((132, 612), small_label, font=font(26, True), fill=fg)
+    dtext(d, (132, 612), small_label, 26, True, fg)
     d.line((132, 668, 890, 668), fill=fg, width=2)
     # Primary block (English phrase / Hindi explanation), then secondary block.
-    face_p, lines_p = fit_block(d, primary, 746, 300, 84, 30)
+    size_p, lines_p = fit_block(d, primary, 746, 300, 84, 30)
     y = 700
     for line in lines_p:
-        d.text((132, y), line, font=face_p, fill=fg)
-        y += face_p.size + 18
-    face_s, lines_s = fit_block(d, secondary, 746, 130, 44, 24, bold=False)
+        dtext(d, (132, y), line, size_p, True, fg)
+        y += size_p + 18
+    size_s, lines_s = fit_block(d, secondary, 746, 130, 44, 24, bold=False)
     y = 1030
     for line in lines_s:
-        d.text((132, y), line, font=face_s, fill=fg)
-        y += face_s.size + 14
+        dtext(d, (132, y), line, size_s, False, fg)
+        y += size_s + 14
     # Deliberate supporting visual, with a different learning cue per scene.
     d.rounded_rectangle((88, 1250, 944, 1428), radius=32, fill="#ffffff")
     d.ellipse((116, 1288, 222, 1394), fill=mint if index != 2 else coral)
@@ -165,15 +218,15 @@ def card(label, primary, secondary, title, index, dest):
         d.rounded_rectangle((141, 1315, 197, 1358), radius=10, outline=ink, width=4)
         d.polygon([(151, 1356), (151, 1371), (171, 1356)], fill=ink)
         heading, detail = "अब आपकी बारी", "खुद एक वाक्य बनाकर देखो।"
-    d.text((252, 1292), heading, font=font(34, True), fill=ink)
-    d.text((252, 1350), detail, font=font(27), fill="#5d706a")
-    for j, line in enumerate(wrap(d, title, font(28), 800)[:2]):
-        d.text((88, 1490+j*36), line, font=font(28), fill="#5d706a")
+    dtext(d, (252, 1292), heading, 34, True, ink)
+    dtext(d, (252, 1350), detail, 27, False, "#5d706a")
+    for j, line in enumerate(wrap(d, title, 28, False, 800)[:2]):
+        dtext(d, (88, 1490+j*36), line, 28, False, "#5d706a")
     # Three-part navigation gives the lesson a clear visual rhythm.
     for j, stage in enumerate(["बोलो", "समझो", "अभ्यास करो"]):
         x = 88+j*290
         d.rounded_rectangle((x, 1608, x+270, 1616), radius=4, fill=coral if j+1 == index else "#ddd6cb")
-        d.text((x, 1636), stage, font=font(24, True), fill=ink if j+1 == index else "#86928b")
+        dtext(d, (x, 1636), stage, 24, True, ink if j+1 == index else "#86928b")
     im.save(dest)
 
 

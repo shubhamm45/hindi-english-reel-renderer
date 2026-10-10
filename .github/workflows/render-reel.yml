@@ -56,7 +56,7 @@ jobs:
           LESSON_JSON: ${{ inputs.lesson_json }}
           BASE_URL: ${{ steps.pages.outputs.base_url }}
         run: |
-          if [ -z "$REQUEST_ID" ]; then export REQUEST_ID="hi-smoke-20261010-001"; fi
+          if [ -z "$REQUEST_ID" ]; then export REQUEST_ID="hi-smoke-$(date +%Y%m%d-%H%M%S)"; fi
           if [ -z "$LESSON_JSON" ]; then export LESSON_JSON="$(cat sample-lesson.json)"; fi
           python render_reel.py
       - name: Save public files for future runs
