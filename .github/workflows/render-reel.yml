@@ -11,6 +11,8 @@ on:
         description: JSON object with title, phrase, meaning and example
         required: true
         type: string
+  push:
+    branches: [main]
 permissions:
   contents: write
   pages: write
@@ -53,7 +55,10 @@ jobs:
           REQUEST_ID: ${{ inputs.request_id }}
           LESSON_JSON: ${{ inputs.lesson_json }}
           BASE_URL: ${{ steps.pages.outputs.base_url }}
-        run: python render_reel.py
+        run: |
+          if [ -z "$REQUEST_ID" ]; then export REQUEST_ID="hi-smoke-20261010-001"; fi
+          if [ -z "$LESSON_JSON" ]; then export LESSON_JSON="$(cat sample-lesson.json)"; fi
+          python render_reel.py
       - name: Save public files for future runs
         run: |
           git config user.name 'github-actions[bot]'
